@@ -37,44 +37,21 @@ import {
 /* FIREBASE SETUP & ENV VARS                                                  */
 /* -------------------------------------------------------------------------- */
 
-let firebaseConfig;
-let yelpApiKey;
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
+};
 
-// 1. PREVIEW ENVIRONMENT (Works in this editor)
-if (typeof __firebase_config !== 'undefined') {
-  firebaseConfig = JSON.parse(__firebase_config);
-  yelpApiKey = ""; // No Yelp key in preview
-} else {
-   2. PRODUCTION ENVIRONMENT (Render / Vite)
-     
-     IMPORTANT: When deploying to Render, UNCOMMENT the block below!
-     This allows the app to read your environment variables.
-  
-
-   UNCOMMENT FOR PRODUCTION:
-  firebaseConfig = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID
-  };
-  
-  // Add this variable in Render Dashboard as VITE_YELP_API_KEY
-  yelpApiKey = import.meta.env.VITE_YELP_API_KEY;
-  
-
-  if (!firebaseConfig) {
-     console.warn("Using placeholder config for development");
-     firebaseConfig = { apiKey: "dev-placeholder" };
-  }
-}
+const yelpApiKey = import.meta.env.VITE_YELP_API_KEY;
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'pickit-prod';
+const appId = 'pickit-prod';
 
 /* -------------------------------------------------------------------------- */
 /* MOCK DATA (Fallback)                                                       */
@@ -137,45 +114,27 @@ const MOCK_RESTAURANTS = [
 /* YELP API UTILS                                                             */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Fetches restaurants from Yelp using a CORS proxy.
- * Warning: Client-side calls to Yelp require a proxy. 
- * Using 'cors-anywhere' for demo purposes.
- */
 const fetchYelpRestaurants = async (location, term) => {
   if (!yelpApiKey) {
     console.warn("Yelp API Key missing. Falling back to mock data.");
     return null;
   }
 
-  // Using cors-anywhere demo proxy. In production, use your own backend.
-  const CORS_PROXY = "https://cors-anywhere.herokuapp.com/";
-  const YELP_ENDPOINT = "https://api.yelp.com/v3/businesses/search";
-  
-  // Combine all preferences into a search term
-  const searchParams = new URLSearchParams({
-    location: location,
-    term: term || "restaurants",
-    limit: 10,
-    sort_by: "best_match"
-  });
-
   try {
-    const response = await fetch(`${CORS_PROXY}${YELP_ENDPOINT}?${searchParams.toString()}`, {
-      headers: {
-        Authorization: `Bearer ${yelpApiKey}`,
-        "X-Requested-With": "XMLHttpRequest" // Required by cors-anywhere
-      }
-    });
+    // Call our backend proxy
+    const response = await fetch(
+      `/api/yelp?location=${encodeURIComponent(location)}&term=${encodeURIComponent(term || 'restaurants')}`
+    );
 
     if (!response.ok) {
-      if (response.status === 403) {
-         console.error("CORS Proxy Error: You might need to visit https://cors-anywhere.herokuapp.com/corsdemo to enable temporary access.");
-      }
       throw new Error(`Yelp API Error: ${response.statusText}`);
     }
 
     const data = await response.json();
+    
+    if (!data.businesses || data.businesses.length === 0) {
+      return null;
+    }
     
     // Map Yelp data to our app's format
     return data.businesses.map(b => ({
@@ -191,7 +150,7 @@ const fetchYelpRestaurants = async (location, term) => {
 
   } catch (error) {
     console.error("Failed to fetch from Yelp:", error);
-    return null; // Triggers fallback
+    return null;
   }
 };
 
@@ -345,15 +304,16 @@ function Lobby({ session, participants, userId, onSubmitPref, onStartVoting, isS
 
   const handleCopy = () => {
     const url = window.location.href;
-    navigator.clipboard.writeText(url);
-    const textArea = document.createElement("textarea");
-    textArea.value = url;
-    document.body.appendChild(textArea);
-    textArea.select();
-    try {
-      document.execCommand('copy');
-    } catch (err) {}
-    document.body.removeChild(textArea);
+    navigator.clipboard.writeText(url).catch(() => {
+      const textArea = document.createElement("textarea");
+      textArea.value = url;
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand('copy');
+      } catch (err) {}
+      document.body.removeChild(textArea);
+    });
 
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -544,7 +504,6 @@ function Voting({ session, candidates, userId, onVote, votes }) {
                <div className="h-48 w-full relative overflow-hidden">
                  <img src={restaurant.image} alt={restaurant.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
                  
-                 {/* Leading Badge */}
                  {isLeading && (
                    <div className="absolute top-4 left-4 z-10">
                       <span className="bg-gradient-to-r from-orange-500 to-red-500 text-white text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1 shadow-lg animate-pulse">
@@ -553,7 +512,6 @@ function Voting({ session, candidates, userId, onVote, votes }) {
                    </div>
                  )}
 
-                 {/* Voted Overlay */}
                  <div className={`absolute inset-0 bg-indigo-900/40 flex items-center justify-center backdrop-blur-[2px] transition-opacity duration-300 ${voted ? 'opacity-100' : 'opacity-0'}`}>
                    <div className="bg-white text-indigo-600 px-6 py-2.5 rounded-full font-bold shadow-xl flex items-center gap-2 transform scale-110">
                      <Check size={20} strokeWidth={3} /> Voted
@@ -580,7 +538,6 @@ function Voting({ session, candidates, userId, onVote, votes }) {
                    <span className="truncate">{restaurant.address}</span>
                  </div>
                  
-                 {/* Vote Progress Bar */}
                  <div className="w-full bg-gray-100 h-2 rounded-full overflow-hidden">
                     <div 
                         className="h-full bg-indigo-500 transition-all duration-500 ease-out"
@@ -705,14 +662,9 @@ export default function App() {
   const [isStarting, setIsStarting] = useState(false);
   const [usingMock, setUsingMock] = useState(false);
 
-  // 1. Auth & Initial Route Check
   useEffect(() => {
     const initAuth = async () => {
-      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-        await signInWithCustomToken(auth, __initial_auth_token);
-      } else {
-        await signInAnonymously(auth);
-      }
+      await signInAnonymously(auth);
     };
     initAuth();
 
@@ -730,7 +682,6 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Data Sync
   useEffect(() => {
     if (!sessionId || !user) return;
 
@@ -772,7 +723,6 @@ export default function App() {
     };
   }, [sessionId, user, view]);
 
-  // 3. Actions
   const createSession = async (hostName, location) => {
     if (!user) return;
     const newSessionId = generateSessionId();
@@ -835,22 +785,17 @@ export default function App() {
     setLoadingMsg('Consulting the Yelp gods...');
     setView('loading');
 
-    // Gather preferences
     const allPrefs = participants
       .map(p => p.preference)
       .filter(p => p && p.trim().length > 0)
       .join(' ');
     
-    // Attempt Yelp Fetch
     let selected = await fetchYelpRestaurants(sessionData.location, allPrefs);
 
     if (!selected || selected.length === 0) {
       setUsingMock(true);
-      // Fallback logic
       const shuffled = [...MOCK_RESTAURANTS].sort(() => 0.5 - Math.random());
       selected = shuffled.slice(0, 5);
-      
-      // Artificial delay if mocking so user sees loading state
       await new Promise(r => setTimeout(r, 2000));
     } else {
       setUsingMock(false);
