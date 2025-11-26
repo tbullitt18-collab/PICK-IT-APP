@@ -30,41 +30,60 @@ import {
   ArrowRight,
   RefreshCw,
   Trophy,
+  AlertCircle
 } from 'lucide-react';
 
 /* -------------------------------------------------------------------------- */
-/* FIREBASE SETUP                              */
+/* FIREBASE SETUP & ENV VARS                                                  */
 /* -------------------------------------------------------------------------- */
 
-// Helper to determine if we are in the preview environment or production
-const isPreviewEnv = typeof __firebase_config !== 'undefined';
+let firebaseConfig;
+let yelpApiKey;
 
-const firebaseConfig = isPreviewEnv
-  ? JSON.parse(__firebase_config)
-  : {
-      // These will be read from Render's Environment Variables
-      apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-      storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-      messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-      appId: import.meta.env.VITE_FIREBASE_APP_ID
-    };
+// 1. PREVIEW ENVIRONMENT (Works in this editor)
+if (typeof __firebase_config !== 'undefined') {
+  firebaseConfig = JSON.parse(__firebase_config);
+  yelpApiKey = ""; // No Yelp key in preview
+} else {
+   2. PRODUCTION ENVIRONMENT (Render / Vite)
+     
+     IMPORTANT: When deploying to Render, UNCOMMENT the block below!
+     This allows the app to read your environment variables.
+  
+
+   UNCOMMENT FOR PRODUCTION:
+  firebaseConfig = {
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID
+  };
+  
+  // Add this variable in Render Dashboard as VITE_YELP_API_KEY
+  yelpApiKey = import.meta.env.VITE_YELP_API_KEY;
+  
+
+  if (!firebaseConfig) {
+     console.warn("Using placeholder config for development");
+     firebaseConfig = { apiKey: "dev-placeholder" };
+  }
+}
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-// Use 'pickit-prod' as default appId in production if global is missing
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'pickit-prod';
 
 /* -------------------------------------------------------------------------- */
-/* MOCK DATA                                   */
+/* MOCK DATA (Fallback)                                                       */
 /* -------------------------------------------------------------------------- */
 
 const MOCK_RESTAURANTS = [
   {
     id: 'r1',
-    name: "Che Butter Jonez",
+    name: "Che Butter Jonez (Mock)",
     image: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=800&q=80",
     rating: 4.8,
     reviewCount: 342,
@@ -111,58 +130,70 @@ const MOCK_RESTAURANTS = [
     price: "$$",
     cuisine: "Asian Fusion, Yakitori",
     address: "1409 North Highland Ave NE, Atlanta, GA 30306"
-  },
-  {
-    id: 'r6',
-    name: "Antico Pizza Napoletana",
-    image: "https://images.unsplash.com/photo-1574071318508-1cdbab80d002?auto=format&fit=crop&w=800&q=80",
-    rating: 4.7,
-    reviewCount: 4100,
-    price: "$$",
-    cuisine: "Pizza, Italian",
-    address: "1093 Hemphill Ave NW, Atlanta, GA 30318"
-  },
-  {
-    id: 'r7',
-    name: "Gunshow",
-    image: "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=800&q=80",
-    rating: 4.6,
-    reviewCount: 1200,
-    price: "$$$",
-    cuisine: "New American, Dim Sum Style",
-    address: "924 Garrett St, Atlanta, GA 30316"
-  },
-  {
-    id: 'r8',
-    name: "Slutty Vegan ATL",
-    image: "https://images.unsplash.com/photo-1520072959219-c595dc3f3a29?auto=format&fit=crop&w=800&q=80",
-    rating: 4.5,
-    reviewCount: 2800,
-    price: "$$",
-    cuisine: "Vegan, Burgers, Fast Food",
-    address: "1542 Ralph David Abernathy Blvd, Atlanta, GA 30310"
-  },
-  {
-    id: 'r9',
-    name: "The Optimist",
-    image: "https://images.unsplash.com/photo-1626082927389-6cd097cdc6ec?auto=format&fit=crop&w=800&q=80",
-    rating: 4.6,
-    reviewCount: 2500,
-    price: "$$$",
-    cuisine: "Seafood, Oyster Bar",
-    address: "914 Howell Mill Rd, Atlanta, GA 30318"
-  },
-  {
-    id: 'r10',
-    name: "Pauley's Crepe Bar",
-    image: "https://images.unsplash.com/photo-1519671482538-518b5c2a9184?auto=format&fit=crop&w=800&q=80",
-    rating: 4.3,
-    reviewCount: 450,
-    price: "$$",
-    cuisine: "Crepes, Bar",
-    address: "1341 Collier Rd NW, Atlanta, GA 30318"
   }
 ];
+
+/* -------------------------------------------------------------------------- */
+/* YELP API UTILS                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Fetches restaurants from Yelp using a CORS proxy.
+ * Warning: Client-side calls to Yelp require a proxy. 
+ * Using 'cors-anywhere' for demo purposes.
+ */
+const fetchYelpRestaurants = async (location, term) => {
+  if (!yelpApiKey) {
+    console.warn("Yelp API Key missing. Falling back to mock data.");
+    return null;
+  }
+
+  // Using cors-anywhere demo proxy. In production, use your own backend.
+  const CORS_PROXY = "https://cors-anywhere.herokuapp.com/";
+  const YELP_ENDPOINT = "https://api.yelp.com/v3/businesses/search";
+  
+  // Combine all preferences into a search term
+  const searchParams = new URLSearchParams({
+    location: location,
+    term: term || "restaurants",
+    limit: 10,
+    sort_by: "best_match"
+  });
+
+  try {
+    const response = await fetch(`${CORS_PROXY}${YELP_ENDPOINT}?${searchParams.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${yelpApiKey}`,
+        "X-Requested-With": "XMLHttpRequest" // Required by cors-anywhere
+      }
+    });
+
+    if (!response.ok) {
+      if (response.status === 403) {
+         console.error("CORS Proxy Error: You might need to visit https://cors-anywhere.herokuapp.com/corsdemo to enable temporary access.");
+      }
+      throw new Error(`Yelp API Error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    // Map Yelp data to our app's format
+    return data.businesses.map(b => ({
+      id: b.id,
+      name: b.name,
+      image: b.image_url || "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=800&q=60",
+      rating: b.rating,
+      reviewCount: b.review_count,
+      price: b.price || "$$",
+      cuisine: b.categories?.[0]?.title || "Restaurant",
+      address: b.location?.address1 || b.location?.city
+    }));
+
+  } catch (error) {
+    console.error("Failed to fetch from Yelp:", error);
+    return null; // Triggers fallback
+  }
+};
 
 /* -------------------------------------------------------------------------- */
 /* UTILS                                       */
@@ -259,23 +290,6 @@ function Landing({ onStart }) {
           </button>
         </form>
       </div>
-
-      <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl w-full">
-        <div className="bg-white/10 backdrop-blur-md p-6 rounded-2xl border border-white/20 hover:bg-white/20 transition-colors">
-          <div className="flex justify-center mb-4">
-            <Flame className="text-yellow-300 drop-shadow-sm" size={32} />
-          </div>
-          <h3 className="text-xl font-bold mb-2">Lightning Fast</h3>
-          <p className="text-purple-100 text-sm leading-relaxed">Create a session in seconds. Share a link. Done. No accounts or downloads required.</p>
-        </div>
-        <div className="bg-white/10 backdrop-blur-md p-6 rounded-2xl border border-white/20 hover:bg-white/20 transition-colors">
-          <div className="flex justify-center mb-4">
-            <Users className="text-blue-300 drop-shadow-sm" size={32} />
-          </div>
-          <h3 className="text-xl font-bold mb-2">Group Sync</h3>
-          <p className="text-purple-100 text-sm leading-relaxed">Our AI analyzes everyone's preferences and finds the perfect restaurants for the whole group.</p>
-        </div>
-      </div>
     </div>
   );
 }
@@ -322,7 +336,7 @@ function JoinSession({ onJoin, sessionId }) {
   );
 }
 
-function Lobby({ session, participants, userId, onSubmitPref, onStartVoting }) {
+function Lobby({ session, participants, userId, onSubmitPref, onStartVoting, isStarting }) {
   const [craving, setCraving] = useState('');
   const [copied, setCopied] = useState(false);
   const userParticipant = participants.find(p => p.userId === userId);
@@ -464,10 +478,14 @@ function Lobby({ session, participants, userId, onSubmitPref, onStartVoting }) {
           <div className="max-w-lg mx-auto">
              <button
               onClick={onStartVoting}
-              disabled={participants.length < 1}
+              disabled={participants.length < 1 || isStarting}
               className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold py-4 rounded-2xl shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-95 transition-all disabled:opacity-50 disabled:scale-100 disabled:shadow-none flex justify-center items-center gap-2 text-lg"
             >
-              Start Voting Phase <ArrowRight size={20} />
+              {isStarting ? (
+                <>Finding Restaurants... <RefreshCw className="animate-spin" /></>
+              ) : (
+                <>Start Voting Phase <ArrowRight size={20} /></>
+              )}
             </button>
           </div>
         </div>
@@ -650,9 +668,9 @@ function Winner({ winner, onReset }) {
   );
 }
 
-function LoadingSpinner({ message }) {
+function LoadingSpinner({ message, isMock }) {
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-white">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-white text-center px-4">
       <div className="relative w-32 h-32 mb-8">
         <div className="absolute inset-0 border-[6px] border-gray-100 rounded-full"></div>
         <div className="absolute inset-0 border-[6px] border-indigo-600 rounded-full border-t-transparent animate-spin"></div>
@@ -662,6 +680,12 @@ function LoadingSpinner({ message }) {
       </div>
       <h2 className="text-2xl font-bold text-gray-800 animate-pulse">{message}</h2>
       <p className="text-gray-400 mt-2">Consulting the hive mind...</p>
+      {isMock && (
+         <div className="mt-8 p-4 bg-yellow-50 border border-yellow-100 rounded-xl text-yellow-800 text-sm max-w-sm flex items-start gap-2 text-left">
+            <AlertCircle className="flex-shrink-0 mt-0.5" size={16} />
+            <p>Using <strong>Demo Data</strong>. Add a Yelp API Key in Render environment variables to see real results!</p>
+         </div>
+      )}
     </div>
   );
 }
@@ -678,6 +702,8 @@ export default function App() {
   const [participants, setParticipants] = useState([]);
   const [votes, setVotes] = useState([]);
   const [loadingMsg, setLoadingMsg] = useState('');
+  const [isStarting, setIsStarting] = useState(false);
+  const [usingMock, setUsingMock] = useState(false);
 
   // 1. Auth & Initial Route Check
   useEffect(() => {
@@ -804,19 +830,38 @@ export default function App() {
 
   const startVoting = async () => {
     if (!user || !sessionId) return;
+    setIsStarting(true);
     
-    setLoadingMsg('Finding the perfect spots...');
+    setLoadingMsg('Consulting the Yelp gods...');
     setView('loading');
 
-    setTimeout(async () => {
-      const shuffled = [...MOCK_RESTAURANTS].sort(() => 0.5 - Math.random());
-      const selected = shuffled.slice(0, 5);
+    // Gather preferences
+    const allPrefs = participants
+      .map(p => p.preference)
+      .filter(p => p && p.trim().length > 0)
+      .join(' ');
+    
+    // Attempt Yelp Fetch
+    let selected = await fetchYelpRestaurants(sessionData.location, allPrefs);
 
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sessions', sessionId), {
-        status: 'voting',
-        candidates: selected
-      });
-    }, 2500);
+    if (!selected || selected.length === 0) {
+      setUsingMock(true);
+      // Fallback logic
+      const shuffled = [...MOCK_RESTAURANTS].sort(() => 0.5 - Math.random());
+      selected = shuffled.slice(0, 5);
+      
+      // Artificial delay if mocking so user sees loading state
+      await new Promise(r => setTimeout(r, 2000));
+    } else {
+      setUsingMock(false);
+    }
+
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sessions', sessionId), {
+      status: 'voting',
+      candidates: selected
+    });
+    
+    setIsStarting(false);
   };
 
   const endVoting = async () => {
@@ -856,6 +901,7 @@ export default function App() {
     setParticipants([]);
     setVotes([]);
     setView('landing');
+    setUsingMock(false);
     window.history.pushState({path:'/'},'','/');
   };
 
@@ -870,9 +916,10 @@ export default function App() {
           userId={user?.uid}
           onSubmitPref={submitPreference}
           onStartVoting={startVoting}
+          isStarting={isStarting}
         />
       )}
-      {view === 'loading' && <LoadingSpinner message={loadingMsg} />}
+      {view === 'loading' && <LoadingSpinner message={loadingMsg} isMock={usingMock} />}
       {view === 'voting' && sessionData && (
         <>
           <Voting 
